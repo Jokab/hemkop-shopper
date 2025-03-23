@@ -26,7 +26,8 @@ export const config = {
   
   // Shopping list
   shoppingList: [
-    "2.5 kg bananer"
+    "2.5 kg bananer",
+    "en burk jordnötssmör"
   ],
   
   // Ollama settings

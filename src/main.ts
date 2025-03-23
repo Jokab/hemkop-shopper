@@ -29,327 +29,26 @@ async function shopForGroceries() {
     // Handle cookie dialog with more patience
     await handleCookieDialog(page);
     
-    console.log('Finding search bar...');
-    
-    // Locate and click the search bar
-    const searchBarLocator = page.locator(config.selectors.searchBar);
-    await searchBarLocator.waitFor({ timeout: config.timeouts.element });
-    await searchBarLocator.click();
-    
-    console.log(`Typing search query: ${config.search.term}...`);
-    
-    // Type "bananer" in the search field
-    await page.keyboard.type(config.search.term);
-    
-    console.log('Submitting search...');
-    
-    // Press Enter to submit the search
-    await page.keyboard.press('Enter');
-    
-    // Wait for URL to change to search results
-    await page.waitForURL(/.*sok.*bananer.*/);
-    
-    // Wait a bit more for the results to fully load
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2000);
-    
-    console.log(`Search complete! Found results for "${config.search.term}".`);
-    
-    // Take a screenshot of the search results
-    await page.screenshot({ path: config.search.screenshotPath });
-    console.log(`Screenshot saved as ${config.search.screenshotPath}`);
-    
-    // Add debugging - check page HTML content
-    console.log('Checking page content for product titles...');
-    const pageContent = await page.content();
-    const productTitleMatches = pageContent.match(/data-testid="product-title"/g);
-    console.log(`Found ${productTitleMatches ? productTitleMatches.length : 0} product-title attributes in HTML`);
-    
-    // Check all p tags with banana in the text
-    const pTagsContent = await page.evaluate(() => {
-      const pTags = document.querySelectorAll('p');
-      return Array.from(pTags).map(p => ({
-        text: p.textContent,
-        className: p.className,
-        dataTestId: p.getAttribute('data-testid')
-      }));
-    });
-    
-    console.log('Found p tags on the page with "banan" in text:');
-    const bananPTags = pTagsContent.filter(p => p.text && p.text.toLowerCase().includes('banan'));
-    bananPTags.forEach((p, i) => {
-      console.log(`P tag ${i}: ${p.text} (class: ${p.className}, data-testid: ${p.dataTestId})`);
-    });
-    
-    // Try locator with class name specifically from the HTML
-    console.log('Trying to find products with specific class name...');
-    const productTitleLocator = page.locator('p.sc-6f5e6e55-0.gUKaNh');
-    const productTitleCount = await productTitleLocator.count();
-    console.log(`Found ${productTitleCount} products with the specific class name`);
-    
-    if (productTitleCount === 0) {
-      throw new Error('No products found on the page with any method');
-    }
-    
-    // Extract product information including prices
-    const products: Product[] = [];
-    for (let i = 0; i < productTitleCount; i++) {
-      const titleElement = productTitleLocator.nth(i);
-      const title = await titleElement.textContent() || 'Unknown product';
+    // Process each item in the shopping list sequentially
+    for (let itemIndex = 0; itemIndex < config.shoppingList.length; itemIndex++) {
+      const shoppingListItem = config.shoppingList[itemIndex];
+      console.log(`\n----- Processing shopping list item ${itemIndex + 1}/${config.shoppingList.length}: ${shoppingListItem} -----\n`);
       
-      // Find the product container for this title
-      const productContainer = titleElement.locator('xpath=./ancestor::div[@data-testid="product-container"]');
+      // Extract search term from shopping list item
+      const searchTerm = extractSearchTerm(shoppingListItem);
       
-      // Extract price and compare price if container found
-      let price = '';
-      let comparePrice = '';
-      let displayVolume = '';
+      // Search for the current item
+      await searchForProduct(page, searchTerm);
       
-      if (await productContainer.count() > 0) {
-        // Extract the price
-        const priceElement = productContainer.locator('[data-testid="price-text"]');
-        if (await priceElement.count() > 0) {
-          price = await priceElement.textContent() || '';
-          // Clean up the price
-          price = price.trim();
-        }
-        
-        // Extract the compare price (jmf pris)
-        const comparePriceElement = productContainer.locator('[data-testid="compare-price"]');
-        if (await comparePriceElement.count() > 0) {
-          comparePrice = await comparePriceElement.textContent() || '';
-          // Clean up the compare price
-          comparePrice = comparePrice.trim();
-        }
-        
-        // Extract the display volume/weight (ca: 170g)
-        const displayVolumeElement = productContainer.locator('[data-testid="display-volume"]');
-        if (await displayVolumeElement.count() > 0) {
-          displayVolume = await displayVolumeElement.textContent() || '';
-          // Clean up the display volume
-          displayVolume = displayVolume.trim();
-        }
-      }
+      // Process search results and add to cart
+      await processSearchResults(page, shoppingListItem);
       
-      products.push({ 
-        title, 
-        element: titleElement,
-        price, 
-        comparePrice,
-        displayVolume,
-        quantity: 0 // Initialize quantity to 0
-      });
-    }
-    
-    console.log(`Found ${products.length} products:`);
-    products.forEach((product, index) => {
-      console.log(`${index + 1}. ${product.title}`);
-      console.log(`   Price: ${product.price || 'N/A'}`);
-      console.log(`   Compare Price: ${product.comparePrice || 'N/A'}`);
-      console.log(`   Display Volume: ${product.displayVolume || 'N/A'}`);
-    });
-    
-    // Use the first shopping list item
-    const shoppingListItem = config.shoppingList[0];
-    console.log(`Shopping for: ${shoppingListItem}`);
-    
-    // Use LLM to select the best product based on the shopping list and price information
-    const selectedProduct = await selectBestProduct(products, shoppingListItem);
-    
-    if (selectedProduct) {
-      console.log(`LLM selected: ${selectedProduct.title}`);
-      if (selectedProduct.price) console.log(`Selected product price: ${selectedProduct.price}`);
-      if (selectedProduct.comparePrice) console.log(`Selected product compare price: ${selectedProduct.comparePrice}`);
-      
-      // Find the product container - go up the DOM tree to the nearest article element
-      const productContainerLocator = selectedProduct.element.locator('xpath=./ancestor::div[@data-testid="product-container"]');
-      console.log('Looking for product container...');
-      
-      if (await productContainerLocator.count() > 0) {
-        console.log('Product container found!');
-        
-        // Find the buy button within the product container with text "Köp"
-        const buyButtonLocator = productContainerLocator.locator('button[data-testid="button"]:has-text("Köp")');
-        
-        if (await buyButtonLocator.count() > 0) {
-          console.log(`Clicking 'Buy' button for: ${selectedProduct.title}`);
-          await buyButtonLocator.click();
-          console.log('Successfully added product to cart!');
-          
-          // Initialize product quantity
-          selectedProduct.quantity = 1;
-          
-          // Wait a moment for the UI to update after clicking buy
-          await page.waitForTimeout(1000); // Increased timeout to ensure UI is fully updated
-          
-          // Debug: Check all buttons in the container
-          console.log("Checking all buttons in the product container after clicking 'Köp':");
-          const allButtons = await productContainerLocator.locator('button').count();
-          console.log(`Found ${allButtons} buttons in the container`);
-          
-          for (let i = 0; i < allButtons; i++) {
-            const button = productContainerLocator.locator('button').nth(i);
-            const text = await button.textContent();
-            const ariaLabel = await button.getAttribute('aria-label');
-            const testId = await button.getAttribute('data-testid');
-            const isVisible = await button.isVisible();
-            console.log(`Button ${i}: Text="${text}", aria-label="${ariaLabel}", data-testid="${testId}", visible=${isVisible}`);
-          }
-          
-          // Use the exact selectors from our debug output
-          const plusButtonLocator = productContainerLocator.locator('button[data-testid="plus-button"], button[aria-label="Öka antal"]');
-          const minusButtonLocator = productContainerLocator.locator('button[data-testid="minus-button"], button[aria-label="Minska antal"]');
-          
-          // Check if the plus button is visible
-          if (await plusButtonLocator.count() > 0) {
-            console.log("Found plus button for quantity adjustment");
-            
-            // Extract weight from display volume for calculations
-            let unitWeight = 0;
-            const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
-            if (weightMatch) {
-              let weight = parseInt(weightMatch[1], 10);
-              const unit = weightMatch[2].toLowerCase();
-              
-              // Convert to grams for calculations
-              if (unit === 'kg') {
-                weight *= 1000;
-              }
-              unitWeight = weight;
-              console.log(`Each ${selectedProduct.title} weighs approximately ${unitWeight}g`);
-            }
-            
-            // Get the required weight from shopping list
-            const shoppingListItem = config.shoppingList[0];
-            const requiredWeightMatch = shoppingListItem.match(/(\d+\.?\d*)\s*(g|gram|kg|kilo)/i);
-            let requiredWeight = 0;
-            
-            if (requiredWeightMatch) {
-              requiredWeight = parseFloat(requiredWeightMatch[1]);
-              const unit = requiredWeightMatch[2].toLowerCase();
-              
-              // Convert to grams for comparison
-              if (unit === 'kg' || unit === 'kilo') {
-                requiredWeight *= 1000;
-              }
-              console.log(`Shopping list requires approximately ${requiredWeight}g`);
-            }
-            
-            // Calculate how many items we need based on weight
-            if (unitWeight > 0 && requiredWeight > 0) {
-              const optimalQuantity = Math.ceil(requiredWeight / unitWeight);
-              const clicksNeeded = optimalQuantity - 1; // Already have one from the initial buy click
-              
-              console.log(`Optimal quantity to reach ${requiredWeight}g is ${optimalQuantity} (${optimalQuantity * unitWeight}g)`);
-              
-              // Click the plus button to increase quantity to optimal amount
-              for (let i = 0; i < clicksNeeded; i++) {
-                console.log(`Clicking plus button (${i+1}/${clicksNeeded})`);
-                await plusButtonLocator.click();
-                selectedProduct.quantity += 1;
-                await page.waitForTimeout(500); // Wait between clicks
-              }
-              
-              console.log(`Added ${optimalQuantity} of ${selectedProduct.title} (${optimalQuantity * unitWeight}g total)`);
-            } else {
-              // If we can't calculate based on weight, just add one more as an example
-              console.log("Adding one more item as an example");
-              await plusButtonLocator.click();
-              selectedProduct.quantity = 2;
-              
-              // Show that minus button works too by demonstrating
-              await page.waitForTimeout(1000);
-              if (await minusButtonLocator.count() > 0) {
-                console.log("Testing minus button functionality");
-                await minusButtonLocator.click();
-                selectedProduct.quantity = 1;
-                await page.waitForTimeout(500);
-                
-                // Add it back
-                await plusButtonLocator.click();
-                selectedProduct.quantity = 2;
-              }
-            }
-          } else {
-            console.log("Plus button not found after buying - may need to adjust selectors");
-          }
-          
-          // Display the final quantity information
-          console.log(`Final quantity: ${selectedProduct.quantity} of ${selectedProduct.title}`);
-          if (selectedProduct.displayVolume) {
-            const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
-            if (weightMatch) {
-              let weight = parseInt(weightMatch[1], 10);
-              const unit = weightMatch[2].toLowerCase();
-              
-              // Convert to grams for calculations
-              if (unit === 'kg') {
-                weight *= 1000;
-              }
-              
-              const totalWeight = weight * selectedProduct.quantity;
-              
-              // Format the total weight nicely
-              let formattedWeight = '';
-              if (totalWeight >= 1000) {
-                formattedWeight = `${(totalWeight / 1000).toFixed(2)}kg`;
-              } else {
-                formattedWeight = `${totalWeight}g`;
-              }
-              
-              console.log(`Total weight: ${formattedWeight}`);
-            }
-          }
-          
-          // Wait a moment to see the result
-          await page.waitForTimeout(3000);
-        } else {
-          console.error('Buy button not found for the selected product');
-          
-          // Debug: List all buttons in the container
-          const allButtons = await productContainerLocator.locator('button').count();
-          console.log(`Found ${allButtons} buttons in the container`);
-          
-          for (let i = 0; i < allButtons; i++) {
-            const button = productContainerLocator.locator('button').nth(i);
-            const text = await button.textContent();
-            const testId = await button.getAttribute('data-testid');
-            console.log(`Button ${i}: Text="${text}", data-testid="${testId}"`);
-          }
-        }
-      } else {
-        console.error('Product container not found for the selected product');
-        // Try an alternative approach to locate the container
-        console.log('Trying alternative approach to find container');
-        
-        // Go up to common parent
-        const parentDivLocator = selectedProduct.element.locator('xpath=./ancestor::div[contains(@class, "sc-56f3097b")]');
-        console.log(`Found ${await parentDivLocator.count()} potential parent divs`);
-        
-        if (await parentDivLocator.count() > 0) {
-          // Find the nearest button that says "Köp"
-          const buyButtonLocator = parentDivLocator.locator('button:has-text("Köp")');
-          
-          if (await buyButtonLocator.count() > 0) {
-            console.log(`Clicking 'Buy' button using alternative method for: ${selectedProduct.title}`);
-            await buyButtonLocator.click();
-            console.log('Successfully added product to cart using alternative method!');
-            
-            // Wait a moment to see the result
-            await page.waitForTimeout(3000);
-          } else {
-            console.error('Buy button not found with alternative method');
-          }
-        } else {
-          console.error('Could not find parent container with alternative method');
-        }
-      }
-    } else {
-      console.error('LLM could not select a product');
+      // Short pause between items
+      await page.waitForTimeout(2000);
     }
     
     // Keep the browser open for the configured amount of time
-    console.log(`Keeping browser open for ${config.timeouts.browserDisplay / 1000} seconds...`);
+    console.log(`\nAll shopping list items processed! Keeping browser open for ${config.timeouts.browserDisplay / 1000} seconds...`);
     await new Promise(resolve => setTimeout(resolve, config.timeouts.browserDisplay));
     
     // Close the browser
@@ -358,6 +57,347 @@ async function shopForGroceries() {
     
   } catch (error) {
     console.error('Error during shopping:', error);
+  }
+}
+
+/**
+ * Extract a search term from a shopping list item
+ * @param shoppingListItem The shopping list item text
+ * @returns The search term to use
+ */
+function extractSearchTerm(shoppingListItem: string): string {
+  // Remove quantities and units to get a clean search term
+  return shoppingListItem
+    .replace(/\d+\.?\d*\s*(g|gram|kg|kilo|st|stycken|förp|förpackning|l|liter)/gi, '')
+    .replace(/^(en|ett)\s+/i, '') // Remove leading "en" or "ett"
+    .replace(/^burk\s+/i, '') // Remove leading container words
+    .replace(/^\s+|\s+$/g, ''); // Trim whitespace
+}
+
+/**
+ * Search for a product on the Hemköp website
+ * @param page Playwright page
+ * @param searchTerm The term to search for
+ */
+async function searchForProduct(page: Page, searchTerm: string) {
+  console.log(`Finding search bar...`);
+  
+  // Locate and click the search bar
+  const searchBarLocator = page.locator(config.selectors.searchBar);
+  await searchBarLocator.waitFor({ timeout: config.timeouts.element });
+  
+  // Clear the search bar properly
+  await searchBarLocator.click();
+  // Triple click to select all text
+  await searchBarLocator.click({ clickCount: 3 });
+  await page.keyboard.press('Backspace');
+  
+  // Additional check - verify the search bar is empty
+  const searchBarValue = await searchBarLocator.inputValue();
+  if (searchBarValue !== '') {
+    console.log(`Search bar not empty, contains: "${searchBarValue}". Clearing again...`);
+    await searchBarLocator.fill('');
+  }
+  
+  console.log(`Typing search query: ${searchTerm}...`);
+  
+  // Type the search term in the search field
+  await page.keyboard.type(searchTerm);
+  
+  console.log('Submitting search...');
+  
+  // Press Enter to submit the search
+  await page.keyboard.press('Enter');
+  
+  // Wait for URL to change to search results
+  await page.waitForURL(/.*sok.*/);
+  
+  // Wait a bit more for the results to fully load
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(2000);
+  
+  console.log(`Search complete! Found results for "${searchTerm}".`);
+  
+  // Take a screenshot of the search results
+  const screenshotPath = `${searchTerm.replace(/\s+/g, '-')}-search-results.png`;
+  await page.screenshot({ path: screenshotPath });
+  console.log(`Screenshot saved as ${screenshotPath}`);
+}
+
+/**
+ * Process search results for a shopping list item
+ * @param page Playwright page
+ * @param shoppingListItem The shopping list item being processed
+ */
+async function processSearchResults(page: Page, shoppingListItem: string) {
+  // Check page content for product titles
+  console.log('Checking page content for product titles...');
+  const pageContent = await page.content();
+  const productTitleMatches = pageContent.match(/data-testid="product-title"/g);
+  console.log(`Found ${productTitleMatches ? productTitleMatches.length : 0} product-title attributes in HTML`);
+  
+  // Try locator with class name specifically from the HTML
+  console.log('Trying to find products with specific class name...');
+  const productTitleLocator = page.locator('p.sc-6f5e6e55-0.gUKaNh');
+  let productTitleCount = await productTitleLocator.count();
+  
+  // If the specific class doesn't work, try a more general selector
+  if (productTitleCount === 0) {
+    console.log('Trying fallback selector for product titles...');
+    const fallbackTitleLocator = page.locator('[data-testid="product-title"]');
+    productTitleCount = await fallbackTitleLocator.count();
+    
+    if (productTitleCount > 0) {
+      console.log(`Found ${productTitleCount} products with fallback selector`);
+    }
+  } else {
+    console.log(`Found ${productTitleCount} products with the specific class name`);
+  }
+  
+  if (productTitleCount === 0) {
+    console.error('No products found on the page with any method');
+    return;
+  }
+  
+  // Extract product information including prices
+  const products: Product[] = [];
+  for (let i = 0; i < productTitleCount; i++) {
+    const titleElement = productTitleLocator.nth(i);
+    const title = await titleElement.textContent() || 'Unknown product';
+    
+    // Find the product container for this title
+    const productContainer = titleElement.locator('xpath=./ancestor::div[@data-testid="product-container"]');
+    
+    // Extract price and compare price if container found
+    let price = '';
+    let comparePrice = '';
+    let displayVolume = '';
+    
+    if (await productContainer.count() > 0) {
+      // Extract the price
+      const priceElement = productContainer.locator('[data-testid="price-text"]');
+      if (await priceElement.count() > 0) {
+        price = await priceElement.textContent() || '';
+        // Clean up the price
+        price = price.trim();
+      }
+      
+      // Extract the compare price (jmf pris)
+      const comparePriceElement = productContainer.locator('[data-testid="compare-price"]');
+      if (await comparePriceElement.count() > 0) {
+        comparePrice = await comparePriceElement.textContent() || '';
+        // Clean up the compare price
+        comparePrice = comparePrice.trim();
+      }
+      
+      // Extract the display volume/weight (ca: 170g)
+      const displayVolumeElement = productContainer.locator('[data-testid="display-volume"]');
+      if (await displayVolumeElement.count() > 0) {
+        displayVolume = await displayVolumeElement.textContent() || '';
+        // Clean up the display volume
+        displayVolume = displayVolume.trim();
+      }
+    }
+    
+    products.push({ 
+      title, 
+      element: titleElement,
+      price, 
+      comparePrice,
+      displayVolume,
+      quantity: 0 // Initialize quantity to 0
+    });
+  }
+  
+  console.log(`Found ${products.length} products:`);
+  products.forEach((product, index) => {
+    console.log(`${index + 1}. ${product.title}`);
+    console.log(`   Price: ${product.price || 'N/A'}`);
+    console.log(`   Compare Price: ${product.comparePrice || 'N/A'}`);
+    console.log(`   Display Volume: ${product.displayVolume || 'N/A'}`);
+  });
+  
+  console.log(`Shopping for: ${shoppingListItem}`);
+  
+  // Use LLM to select the best product based on the shopping list and price information
+  const selectedProduct = await selectBestProduct(products, shoppingListItem);
+  
+  if (selectedProduct) {
+    console.log(`LLM selected: ${selectedProduct.title}`);
+    if (selectedProduct.price) console.log(`Selected product price: ${selectedProduct.price}`);
+    if (selectedProduct.comparePrice) console.log(`Selected product compare price: ${selectedProduct.comparePrice}`);
+    
+    // Find the product container - go up the DOM tree to the nearest article element
+    const productContainerLocator = selectedProduct.element.locator('xpath=./ancestor::div[@data-testid="product-container"]');
+    console.log('Looking for product container...');
+    
+    if (await productContainerLocator.count() > 0) {
+      console.log('Product container found!');
+      
+      // Find the buy button within the product container with text "Köp"
+      const buyButtonLocator = productContainerLocator.locator('button[data-testid="button"]:has-text("Köp")');
+      
+      if (await buyButtonLocator.count() > 0) {
+        console.log(`Clicking 'Buy' button for: ${selectedProduct.title}`);
+        await buyButtonLocator.click();
+        console.log('Successfully added product to cart!');
+        
+        // Initialize product quantity
+        selectedProduct.quantity = 1;
+        
+        // Wait a moment for the UI to update after clicking buy
+        await page.waitForTimeout(1000); // Increased timeout to ensure UI is fully updated
+        
+        // Debug: Check all buttons in the container
+        console.log("Checking all buttons in the product container after clicking 'Köp':");
+        const allButtons = await productContainerLocator.locator('button').count();
+        console.log(`Found ${allButtons} buttons in the container`);
+        
+        for (let i = 0; i < allButtons; i++) {
+          const button = productContainerLocator.locator('button').nth(i);
+          const text = await button.textContent();
+          const ariaLabel = await button.getAttribute('aria-label');
+          const testId = await button.getAttribute('data-testid');
+          const isVisible = await button.isVisible();
+          console.log(`Button ${i}: Text="${text}", aria-label="${ariaLabel}", data-testid="${testId}", visible=${isVisible}`);
+        }
+        
+        // Use the exact selectors from our debug output
+        const plusButtonLocator = productContainerLocator.locator('button[data-testid="plus-button"], button[aria-label="Öka antal"]');
+        const minusButtonLocator = productContainerLocator.locator('button[data-testid="minus-button"], button[aria-label="Minska antal"]');
+        
+        // Check if the plus button is visible
+        if (await plusButtonLocator.count() > 0) {
+          console.log("Found plus button for quantity adjustment");
+          
+          // Extract weight from display volume for calculations
+          let unitWeight = 0;
+          const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
+          if (weightMatch) {
+            let weight = parseInt(weightMatch[1], 10);
+            const unit = weightMatch[2].toLowerCase();
+            
+            // Convert to grams for calculations
+            if (unit === 'kg') {
+              weight *= 1000;
+            }
+            unitWeight = weight;
+            console.log(`Each ${selectedProduct.title} weighs approximately ${unitWeight}g`);
+          }
+          
+          // Get the required weight from shopping list
+          const requiredWeightMatch = shoppingListItem.match(/(\d+\.?\d*)\s*(g|gram|kg|kilo)/i);
+          let requiredWeight = 0;
+          
+          if (requiredWeightMatch) {
+            requiredWeight = parseFloat(requiredWeightMatch[1]);
+            const unit = requiredWeightMatch[2].toLowerCase();
+            
+            // Convert to grams for comparison
+            if (unit === 'kg' || unit === 'kilo') {
+              requiredWeight *= 1000;
+            }
+            console.log(`Shopping list requires approximately ${requiredWeight}g`);
+          }
+          
+          // Calculate how many items we need based on weight
+          if (unitWeight > 0 && requiredWeight > 0) {
+            const optimalQuantity = Math.ceil(requiredWeight / unitWeight);
+            const clicksNeeded = optimalQuantity - 1; // Already have one from the initial buy click
+            
+            console.log(`Optimal quantity to reach ${requiredWeight}g is ${optimalQuantity} (${optimalQuantity * unitWeight}g)`);
+            
+            // Click the plus button to increase quantity to optimal amount
+            for (let i = 0; i < clicksNeeded; i++) {
+              console.log(`Clicking plus button (${i+1}/${clicksNeeded})`);
+              await plusButtonLocator.click();
+              selectedProduct.quantity += 1;
+              await page.waitForTimeout(500); // Wait between clicks
+            }
+            
+            console.log(`Added ${optimalQuantity} of ${selectedProduct.title} (${optimalQuantity * unitWeight}g total)`);
+          } else {
+            // If we can't calculate based on weight, just add one more as an example
+            console.log("Adding one more item as an example");
+            await plusButtonLocator.click();
+            selectedProduct.quantity = 2;
+          }
+        } else {
+          console.log("Plus button not found after buying - may need to adjust selectors");
+        }
+        
+        // Display the final quantity information
+        console.log(`Final quantity: ${selectedProduct.quantity} of ${selectedProduct.title}`);
+        if (selectedProduct.displayVolume) {
+          const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
+          if (weightMatch) {
+            let weight = parseInt(weightMatch[1], 10);
+            const unit = weightMatch[2].toLowerCase();
+            
+            // Convert to grams for calculations
+            if (unit === 'kg') {
+              weight *= 1000;
+            }
+            
+            const totalWeight = weight * selectedProduct.quantity;
+            
+            // Format the total weight nicely
+            let formattedWeight = '';
+            if (totalWeight >= 1000) {
+              formattedWeight = `${(totalWeight / 1000).toFixed(2)}kg`;
+            } else {
+              formattedWeight = `${totalWeight}g`;
+            }
+            
+            console.log(`Total weight: ${formattedWeight}`);
+          }
+        }
+        
+        // Wait a moment to see the result
+        await page.waitForTimeout(2000);
+      } else {
+        console.error('Buy button not found for the selected product');
+        
+        // Debug: List all buttons in the container
+        const allButtons = await productContainerLocator.locator('button').count();
+        console.log(`Found ${allButtons} buttons in the container`);
+        
+        for (let i = 0; i < allButtons; i++) {
+          const button = productContainerLocator.locator('button').nth(i);
+          const text = await button.textContent();
+          const testId = await button.getAttribute('data-testid');
+          console.log(`Button ${i}: Text="${text}", data-testid="${testId}"`);
+        }
+      }
+    } else {
+      console.error('Product container not found for the selected product');
+      // Try an alternative approach to locate the container
+      console.log('Trying alternative approach to find container');
+      
+      // Go up to common parent
+      const parentDivLocator = selectedProduct.element.locator('xpath=./ancestor::div[contains(@class, "sc-56f3097b")]');
+      console.log(`Found ${await parentDivLocator.count()} potential parent divs`);
+      
+      if (await parentDivLocator.count() > 0) {
+        // Find the nearest button that says "Köp"
+        const buyButtonLocator = parentDivLocator.locator('button:has-text("Köp")');
+        
+        if (await buyButtonLocator.count() > 0) {
+          console.log(`Clicking 'Buy' button using alternative method for: ${selectedProduct.title}`);
+          await buyButtonLocator.click();
+          console.log('Successfully added product to cart using alternative method!');
+          
+          // Wait a moment to see the result
+          await page.waitForTimeout(2000);
+        } else {
+          console.error('Buy button not found with alternative method');
+        }
+      } else {
+        console.error('Could not find parent container with alternative method');
+      }
+    }
+  } else {
+    console.error('LLM could not select a product');
   }
 }
 
