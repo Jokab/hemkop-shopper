@@ -1,6 +1,7 @@
 import { Ollama } from 'ollama';
 import { config } from './config';
 import { Product } from './types';
+import { logger } from './logger';
 
 /**
  * Sends a request to Ollama LLM to select the best product match
@@ -8,8 +9,8 @@ import { Product } from './types';
  */
 export async function selectBestProduct(products: Product[], shoppingListItem: string): Promise<Product | null> {
   try {
-    console.log(`Asking LLM to select the best match for: ${shoppingListItem}`);
-    console.log(`Found ${products.length} products to choose from.`);
+    logger.info(`Shopping for: ${shoppingListItem}`);
+    logger.debug(`Asking LLM to select the best match from ${products.length} products`);
     
     // Check if the shopping list item mentions weight requirements
     const weightMatch = shoppingListItem.match(/(\d+\.?\d*)\s*(g|gram|kg|kilo)/i);
@@ -19,12 +20,12 @@ export async function selectBestProduct(products: Product[], shoppingListItem: s
     if (weightMatch) {
       requestedWeight = parseFloat(weightMatch[1]);
       requestedUnit = weightMatch[2].toLowerCase();
-      console.log(`Detected weight requirement: ${requestedWeight}${requestedUnit}`);
+      logger.debug(`Detected weight requirement: ${requestedWeight}${requestedUnit}`);
       
       // Convert to grams for easier comparison
       if (requestedUnit === 'kg' || requestedUnit === 'kilo') {
         requestedWeight *= 1000;
-        console.log(`Converted to ${requestedWeight}g for comparison`);
+        logger.debug(`Converted to ${requestedWeight}g for comparison`);
       }
       
       // Try to find the best match based on weight without using LLM
@@ -56,13 +57,13 @@ export async function selectBestProduct(products: Product[], shoppingListItem: s
         // Sort by closest to requested weight
         validProducts.sort((a, b) => a.weight - b.weight);
         const bestMatch = validProducts[0].product;
-        console.log(`Automatic weight-based selection: ${bestMatch.title} (${validProducts[0].weight}g)`);
+        logger.decision(`Selected ${bestMatch.title} (${validProducts[0].weight}g) to meet weight requirement of ${requestedWeight}g`);
         return bestMatch;
       } else {
         // If no product >= requested weight, get the largest one
         productWeights.sort((a, b) => b.weight - a.weight);
         const bestMatch = productWeights[0].product;
-        console.log(`No product meets weight requirement. Using largest: ${bestMatch.title} (${productWeights[0].weight}g)`);
+        logger.decision(`No product meets the weight requirement of ${requestedWeight}g. Using largest available: ${bestMatch.title} (${productWeights[0].weight}g)`);
         return bestMatch;
       }
     }
@@ -93,9 +94,17 @@ WEIGHT IS THE MOST IMPORTANT FACTOR. Pick the product with weight closest to but
 Also consider type, quality requirements, and price in your decision.
 If weight matches, then prefer products with the lowest comparison price (jmf pris).
 
-Reply with ONLY a single digit number representing your choice, nothing else. For example: 2
+First, explain your reasoning in detail. Consider the following factors:
+1. Weight/volume match with the requirement
+2. Product quality and type match
+3. Price comparison
+4. Any other relevant factors
+
+Then, in the final line, provide ONLY a single digit number representing your choice. For example: 2
 `;
 
+    logger.debug('Sending request to LLM...');
+    
     // Make the API call to Ollama
     const response = await ollama.chat({
       model: config.ollama.model,
@@ -114,17 +123,27 @@ Reply with ONLY a single digit number representing your choice, nothing else. Fo
       }
     });
     
-    console.log("LLM response: ", response.message.content);
-    
-    // Extract the product number from the response, looking for a single digit
     const responseText = response.message.content.trim();
+    logger.llm(`LLM reasoning:\n${responseText}`);
     
-    // Check for "Product 2" pattern first, as this is often more reliable
+    // Extract the product number from the response
+    
+    // First look for digits at the end of the response (most reliable)
+    const lastLineMatch = responseText.split('\n').filter(line => line.trim().length > 0).pop()?.match(/(\d+)/);
+    if (lastLineMatch) {
+      const selectedIndex = parseInt(lastLineMatch[1], 10) - 1;
+      if (selectedIndex >= 0 && selectedIndex < products.length) {
+        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
+        return products[selectedIndex];
+      }
+    }
+    
+    // Check for "Product 2" pattern
     const productPhraseMatch = /Product\s+(\d+)/i.exec(responseText);
     if (productPhraseMatch) {
       const selectedIndex = parseInt(productPhraseMatch[1], 10) - 1;
       if (selectedIndex >= 0 && selectedIndex < products.length) {
-        console.log(`LLM mentioned product ${selectedIndex + 1} in explanation: ${products[selectedIndex].title}`);
+        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
         return products[selectedIndex];
       }
     }
@@ -134,7 +153,7 @@ Reply with ONLY a single digit number representing your choice, nothing else. Fo
     if (singleDigitMatch) {
       const selectedIndex = parseInt(singleDigitMatch[0], 10) - 1;
       if (selectedIndex >= 0 && selectedIndex < products.length) {
-        console.log(`LLM selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
+        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
         return products[selectedIndex];
       }
     }
@@ -144,21 +163,21 @@ Reply with ONLY a single digit number representing your choice, nothing else. Fo
     if (anyNumberMatch) {
       const selectedIndex = parseInt(anyNumberMatch[1], 10) - 1;
       if (selectedIndex >= 0 && selectedIndex < products.length) {
-        console.log(`Found number ${anyNumberMatch[1]} in response, selecting product: ${products[selectedIndex].title}`);
+        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
         return products[selectedIndex];
       }
     }
     
     // If we still haven't found a valid product, use the first one as fallback
-    console.error("Could not determine product selection from LLM response");
+    logger.error("Could not determine product selection from LLM response");
     if (products.length > 0) {
-      console.log(`Falling back to first product: ${products[0].title}`);
+      logger.product(`Falling back to first product: ${products[0].title}`);
       return products[0];
     }
     
     return null;
   } catch (error) {
-    console.error("Error with LLM selection:", error);
+    logger.error(`Error with LLM selection: ${error}`);
     return null;
   }
 } 

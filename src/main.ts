@@ -2,11 +2,12 @@ import { chromium, Page } from 'playwright';
 import { config } from './config';
 import { selectBestProduct } from './llm';
 import { Product } from './types';
+import { logger } from './logger';
 
 // No longer need to define Product interface here since we're importing it
 
 async function shopForGroceries() {
-  console.log('Starting browser...');
+  logger.info('Starting shopping process');
   
   try {
     // Launch the browser
@@ -17,14 +18,14 @@ async function shopForGroceries() {
     const context = await browser.newContext();
     const page = await context.newPage();
     
-    console.log(`Navigating to ${config.baseUrl}...`);
+    logger.debug(`Navigating to ${config.baseUrl}...`);
     
     // Navigate to Hemköp's website
     await page.goto(config.baseUrl);
     
     // Wait for the page content to stabilize a bit
     await page.waitForLoadState('domcontentloaded');
-    console.log('Page loaded. Waiting for cookie dialog...');
+    logger.debug('Page loaded. Waiting for cookie dialog...');
     
     // Handle cookie dialog with more patience
     await handleCookieDialog(page);
@@ -32,7 +33,7 @@ async function shopForGroceries() {
     // Process each item in the shopping list sequentially
     for (let itemIndex = 0; itemIndex < config.shoppingList.length; itemIndex++) {
       const shoppingListItem = config.shoppingList[itemIndex];
-      console.log(`\n----- Processing shopping list item ${itemIndex + 1}/${config.shoppingList.length}: ${shoppingListItem} -----\n`);
+      logger.info(`Processing item ${itemIndex + 1}/${config.shoppingList.length}: ${shoppingListItem}`);
       
       // Extract search term from shopping list item
       const searchTerm = extractSearchTerm(shoppingListItem);
@@ -48,15 +49,15 @@ async function shopForGroceries() {
     }
     
     // Keep the browser open for the configured amount of time
-    console.log(`\nAll shopping list items processed! Keeping browser open for ${config.timeouts.browserDisplay / 1000} seconds...`);
+    logger.info(`All shopping list items processed! Keeping browser open for ${config.timeouts.browserDisplay / 1000} seconds...`);
     await new Promise(resolve => setTimeout(resolve, config.timeouts.browserDisplay));
     
     // Close the browser
     await browser.close();
-    console.log('Browser closed.');
+    logger.debug('Browser closed.');
     
   } catch (error) {
-    console.error('Error during shopping:', error);
+    logger.error(`Error during shopping: ${error}`);
   }
 }
 
@@ -67,11 +68,14 @@ async function shopForGroceries() {
  */
 function extractSearchTerm(shoppingListItem: string): string {
   // Remove quantities and units to get a clean search term
-  return shoppingListItem
+  const searchTerm = shoppingListItem
     .replace(/\d+\.?\d*\s*(g|gram|kg|kilo|st|stycken|förp|förpackning|l|liter)/gi, '')
     .replace(/^(en|ett)\s+/i, '') // Remove leading "en" or "ett"
     .replace(/^burk\s+/i, '') // Remove leading container words
     .replace(/^\s+|\s+$/g, ''); // Trim whitespace
+  
+  logger.debug(`Extracted search term: "${searchTerm}" from "${shoppingListItem}"`);
+  return searchTerm;
 }
 
 /**
@@ -80,7 +84,7 @@ function extractSearchTerm(shoppingListItem: string): string {
  * @param searchTerm The term to search for
  */
 async function searchForProduct(page: Page, searchTerm: string) {
-  console.log(`Finding search bar...`);
+  logger.debug(`Finding search bar...`);
   
   // Locate and click the search bar
   const searchBarLocator = page.locator(config.selectors.searchBar);
@@ -95,16 +99,16 @@ async function searchForProduct(page: Page, searchTerm: string) {
   // Additional check - verify the search bar is empty
   const searchBarValue = await searchBarLocator.inputValue();
   if (searchBarValue !== '') {
-    console.log(`Search bar not empty, contains: "${searchBarValue}". Clearing again...`);
+    logger.debug(`Search bar not empty, contains: "${searchBarValue}". Clearing again...`);
     await searchBarLocator.fill('');
   }
   
-  console.log(`Typing search query: ${searchTerm}...`);
+  logger.debug(`Typing search query: ${searchTerm}...`);
   
   // Type the search term in the search field
   await page.keyboard.type(searchTerm);
   
-  console.log('Submitting search...');
+  logger.debug('Submitting search...');
   
   // Press Enter to submit the search
   await page.keyboard.press('Enter');
@@ -116,12 +120,12 @@ async function searchForProduct(page: Page, searchTerm: string) {
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(2000);
   
-  console.log(`Search complete! Found results for "${searchTerm}".`);
+  logger.debug(`Search complete! Found results for "${searchTerm}".`);
   
   // Take a screenshot of the search results
   const screenshotPath = `${searchTerm.replace(/\s+/g, '-')}-search-results.png`;
   await page.screenshot({ path: screenshotPath });
-  console.log(`Screenshot saved as ${screenshotPath}`);
+  logger.debug(`Screenshot saved as ${screenshotPath}`);
 }
 
 /**
@@ -131,31 +135,31 @@ async function searchForProduct(page: Page, searchTerm: string) {
  */
 async function processSearchResults(page: Page, shoppingListItem: string) {
   // Check page content for product titles
-  console.log('Checking page content for product titles...');
+  logger.debug('Checking page content for product titles...');
   const pageContent = await page.content();
   const productTitleMatches = pageContent.match(/data-testid="product-title"/g);
-  console.log(`Found ${productTitleMatches ? productTitleMatches.length : 0} product-title attributes in HTML`);
+  logger.debug(`Found ${productTitleMatches ? productTitleMatches.length : 0} product-title attributes in HTML`);
   
   // Try locator with class name specifically from the HTML
-  console.log('Trying to find products with specific class name...');
+  logger.debug('Trying to find products with specific class name...');
   const productTitleLocator = page.locator('p.sc-6f5e6e55-0.gUKaNh');
   let productTitleCount = await productTitleLocator.count();
   
   // If the specific class doesn't work, try a more general selector
   if (productTitleCount === 0) {
-    console.log('Trying fallback selector for product titles...');
+    logger.debug('Trying fallback selector for product titles...');
     const fallbackTitleLocator = page.locator('[data-testid="product-title"]');
     productTitleCount = await fallbackTitleLocator.count();
     
     if (productTitleCount > 0) {
-      console.log(`Found ${productTitleCount} products with fallback selector`);
+      logger.debug(`Found ${productTitleCount} products with fallback selector`);
     }
   } else {
-    console.log(`Found ${productTitleCount} products with the specific class name`);
+    logger.debug(`Found ${productTitleCount} products with the specific class name`);
   }
   
   if (productTitleCount === 0) {
-    console.error('No products found on the page with any method');
+    logger.error('No products found on the page with any method');
     return;
   }
   
@@ -209,38 +213,38 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
     });
   }
   
-  console.log(`Found ${products.length} products:`);
-  products.forEach((product, index) => {
-    console.log(`${index + 1}. ${product.title}`);
-    console.log(`   Price: ${product.price || 'N/A'}`);
-    console.log(`   Compare Price: ${product.comparePrice || 'N/A'}`);
-    console.log(`   Display Volume: ${product.displayVolume || 'N/A'}`);
-  });
-  
-  console.log(`Shopping for: ${shoppingListItem}`);
+  logger.debug(`Found ${products.length} products:`);
+  if (logger.isDebugEnabled()) {
+    products.forEach((product, index) => {
+      logger.debug(`${index + 1}. ${product.title}`);
+      logger.debug(`   Price: ${product.price || 'N/A'}`);
+      logger.debug(`   Compare Price: ${product.comparePrice || 'N/A'}`);
+      logger.debug(`   Display Volume: ${product.displayVolume || 'N/A'}`);
+    });
+  }
   
   // Use LLM to select the best product based on the shopping list and price information
   const selectedProduct = await selectBestProduct(products, shoppingListItem);
   
   if (selectedProduct) {
-    console.log(`LLM selected: ${selectedProduct.title}`);
-    if (selectedProduct.price) console.log(`Selected product price: ${selectedProduct.price}`);
-    if (selectedProduct.comparePrice) console.log(`Selected product compare price: ${selectedProduct.comparePrice}`);
+    logger.info(`Selected: ${selectedProduct.title}`);
+    logger.debug(`Selected product price: ${selectedProduct.price || 'N/A'}`);
+    logger.debug(`Selected product compare price: ${selectedProduct.comparePrice || 'N/A'}`);
     
     // Find the product container - go up the DOM tree to the nearest article element
     const productContainerLocator = selectedProduct.element.locator('xpath=./ancestor::div[@data-testid="product-container"]');
-    console.log('Looking for product container...');
+    logger.debug('Looking for product container...');
     
     if (await productContainerLocator.count() > 0) {
-      console.log('Product container found!');
+      logger.debug('Product container found!');
       
       // Find the buy button within the product container with text "Köp"
       const buyButtonLocator = productContainerLocator.locator('button[data-testid="button"]:has-text("Köp")');
       
       if (await buyButtonLocator.count() > 0) {
-        console.log(`Clicking 'Buy' button for: ${selectedProduct.title}`);
+        logger.debug(`Clicking 'Buy' button for: ${selectedProduct.title}`);
         await buyButtonLocator.click();
-        console.log('Successfully added product to cart!');
+        logger.info('Added product to cart');
         
         // Initialize product quantity
         selectedProduct.quantity = 1;
@@ -249,17 +253,19 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
         await page.waitForTimeout(1000); // Increased timeout to ensure UI is fully updated
         
         // Debug: Check all buttons in the container
-        console.log("Checking all buttons in the product container after clicking 'Köp':");
+        logger.debug("Checking all buttons in the product container after clicking 'Köp':");
         const allButtons = await productContainerLocator.locator('button').count();
-        console.log(`Found ${allButtons} buttons in the container`);
+        logger.debug(`Found ${allButtons} buttons in the container`);
         
-        for (let i = 0; i < allButtons; i++) {
-          const button = productContainerLocator.locator('button').nth(i);
-          const text = await button.textContent();
-          const ariaLabel = await button.getAttribute('aria-label');
-          const testId = await button.getAttribute('data-testid');
-          const isVisible = await button.isVisible();
-          console.log(`Button ${i}: Text="${text}", aria-label="${ariaLabel}", data-testid="${testId}", visible=${isVisible}`);
+        if (logger.isDebugEnabled()) {
+          for (let i = 0; i < allButtons; i++) {
+            const button = productContainerLocator.locator('button').nth(i);
+            const text = await button.textContent();
+            const ariaLabel = await button.getAttribute('aria-label');
+            const testId = await button.getAttribute('data-testid');
+            const isVisible = await button.isVisible();
+            logger.debug(`Button ${i}: Text="${text}", aria-label="${ariaLabel}", data-testid="${testId}", visible=${isVisible}`);
+          }
         }
         
         // Use the exact selectors from our debug output
@@ -268,7 +274,7 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
         
         // Check if the plus button is visible
         if (await plusButtonLocator.count() > 0) {
-          console.log("Found plus button for quantity adjustment");
+          logger.debug("Found plus button for quantity adjustment");
           
           // Extract weight from display volume for calculations
           let unitWeight = 0;
@@ -282,7 +288,7 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
               weight *= 1000;
             }
             unitWeight = weight;
-            console.log(`Each ${selectedProduct.title} weighs approximately ${unitWeight}g`);
+            logger.debug(`Each ${selectedProduct.title} weighs approximately ${unitWeight}g`);
           }
           
           // Get the required weight from shopping list
@@ -297,7 +303,7 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
             if (unit === 'kg' || unit === 'kilo') {
               requiredWeight *= 1000;
             }
-            console.log(`Shopping list requires approximately ${requiredWeight}g`);
+            logger.debug(`Shopping list requires approximately ${requiredWeight}g`);
           }
           
           // Calculate how many items we need based on weight
@@ -305,29 +311,30 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
             const optimalQuantity = Math.ceil(requiredWeight / unitWeight);
             const clicksNeeded = optimalQuantity - 1; // Already have one from the initial buy click
             
-            console.log(`Optimal quantity to reach ${requiredWeight}g is ${optimalQuantity} (${optimalQuantity * unitWeight}g)`);
+            logger.debug(`Optimal quantity to reach ${requiredWeight}g is ${optimalQuantity} (${optimalQuantity * unitWeight}g)`);
             
             // Click the plus button to increase quantity to optimal amount
             for (let i = 0; i < clicksNeeded; i++) {
-              console.log(`Clicking plus button (${i+1}/${clicksNeeded})`);
+              logger.debug(`Clicking plus button (${i+1}/${clicksNeeded})`);
               await plusButtonLocator.click();
               selectedProduct.quantity += 1;
               await page.waitForTimeout(500); // Wait between clicks
             }
             
-            console.log(`Added ${optimalQuantity} of ${selectedProduct.title} (${optimalQuantity * unitWeight}g total)`);
+            logger.info(`Added ${optimalQuantity} of ${selectedProduct.title} (${optimalQuantity * unitWeight}g total)`);
           } else {
             // If we can't calculate based on weight, just add one more as an example
-            console.log("Adding one more item as an example");
+            logger.debug("Adding one more item as an example");
             await plusButtonLocator.click();
             selectedProduct.quantity = 2;
+            logger.info(`Added 2 of ${selectedProduct.title}`);
           }
         } else {
-          console.log("Plus button not found after buying - may need to adjust selectors");
+          logger.debug("Plus button not found after buying - may need to adjust selectors");
         }
         
         // Display the final quantity information
-        console.log(`Final quantity: ${selectedProduct.quantity} of ${selectedProduct.title}`);
+        logger.info(`Final quantity: ${selectedProduct.quantity} of ${selectedProduct.title}`);
         if (selectedProduct.displayVolume) {
           const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
           if (weightMatch) {
@@ -349,55 +356,57 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
               formattedWeight = `${totalWeight}g`;
             }
             
-            console.log(`Total weight: ${formattedWeight}`);
+            logger.info(`Total weight: ${formattedWeight}`);
           }
         }
         
         // Wait a moment to see the result
         await page.waitForTimeout(2000);
       } else {
-        console.error('Buy button not found for the selected product');
+        logger.error('Buy button not found for the selected product');
         
         // Debug: List all buttons in the container
-        const allButtons = await productContainerLocator.locator('button').count();
-        console.log(`Found ${allButtons} buttons in the container`);
-        
-        for (let i = 0; i < allButtons; i++) {
-          const button = productContainerLocator.locator('button').nth(i);
-          const text = await button.textContent();
-          const testId = await button.getAttribute('data-testid');
-          console.log(`Button ${i}: Text="${text}", data-testid="${testId}"`);
+        if (logger.isDebugEnabled()) {
+          const allButtons = await productContainerLocator.locator('button').count();
+          logger.debug(`Found ${allButtons} buttons in the container`);
+          
+          for (let i = 0; i < allButtons; i++) {
+            const button = productContainerLocator.locator('button').nth(i);
+            const text = await button.textContent();
+            const testId = await button.getAttribute('data-testid');
+            logger.debug(`Button ${i}: Text="${text}", data-testid="${testId}"`);
+          }
         }
       }
     } else {
-      console.error('Product container not found for the selected product');
+      logger.error('Product container not found for the selected product');
       // Try an alternative approach to locate the container
-      console.log('Trying alternative approach to find container');
+      logger.debug('Trying alternative approach to find container');
       
       // Go up to common parent
       const parentDivLocator = selectedProduct.element.locator('xpath=./ancestor::div[contains(@class, "sc-56f3097b")]');
-      console.log(`Found ${await parentDivLocator.count()} potential parent divs`);
+      logger.debug(`Found ${await parentDivLocator.count()} potential parent divs`);
       
       if (await parentDivLocator.count() > 0) {
         // Find the nearest button that says "Köp"
         const buyButtonLocator = parentDivLocator.locator('button:has-text("Köp")');
         
         if (await buyButtonLocator.count() > 0) {
-          console.log(`Clicking 'Buy' button using alternative method for: ${selectedProduct.title}`);
+          logger.debug(`Clicking 'Buy' button using alternative method for: ${selectedProduct.title}`);
           await buyButtonLocator.click();
-          console.log('Successfully added product to cart using alternative method!');
+          logger.info('Added product to cart using alternative method');
           
           // Wait a moment to see the result
           await page.waitForTimeout(2000);
         } else {
-          console.error('Buy button not found with alternative method');
+          logger.error('Buy button not found with alternative method');
         }
       } else {
-        console.error('Could not find parent container with alternative method');
+        logger.error('Could not find parent container with alternative method');
       }
     }
   } else {
-    console.error('LLM could not select a product');
+    logger.error('LLM could not select a product');
   }
 }
 
@@ -412,7 +421,7 @@ async function handleCookieDialog(page: Page): Promise<boolean> {
   const pollingInterval = 1000; // Check every second
   const maxAttempts = cookieTimeout / pollingInterval;
   
-  console.log(`Waiting up to ${cookieTimeout/1000} seconds for cookie dialog...`);
+  logger.debug(`Waiting up to ${cookieTimeout/1000} seconds for cookie dialog...`);
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Try to find the reject button
@@ -423,14 +432,14 @@ async function handleCookieDialog(page: Page): Promise<boolean> {
       const isVisible = await rejectButtonLocator.isVisible({ timeout: pollingInterval });
       
       if (isVisible) {
-        console.log(`Cookie dialog found on attempt ${attempt + 1}. Rejecting cookies...`);
+        logger.debug(`Cookie dialog found on attempt ${attempt + 1}. Rejecting cookies...`);
         
         // Add a small delay to ensure the dialog is fully loaded and clickable
         await page.waitForTimeout(500);
         
         // Click the reject button
         await rejectButtonLocator.click();
-        console.log('Clicked reject button, continuing...');
+        logger.debug('Clicked reject button, continuing...');
         
         // Don't wait for dialog to disappear, just move on
         return true;
@@ -440,17 +449,17 @@ async function handleCookieDialog(page: Page): Promise<boolean> {
     }
     
     if (attempt < maxAttempts - 1) {
-      console.log(`Cookie dialog not found on attempt ${attempt + 1}. Waiting...`);
+      logger.debug(`Cookie dialog not found on attempt ${attempt + 1}. Waiting...`);
       await page.waitForTimeout(pollingInterval);
     }
   }
   
-  console.log('Cookie dialog not found after multiple attempts. Continuing anyway...');
+  logger.debug('Cookie dialog not found after multiple attempts. Continuing anyway...');
   return false;
 }
 
 // Run the main function
 shopForGroceries().catch(error => {
-  console.error('Unhandled error:', error);
+  logger.error(`Unhandled error: ${error}`);
   process.exit(1);
 }); 

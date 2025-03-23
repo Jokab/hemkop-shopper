@@ -5,6 +5,8 @@
   "license": "MIT",
   "scripts": {
     "start": "ts-node src/main.ts",
+    "verbose": "ts-node src/main.ts -v",
+    "debug": "ts-node src/main.ts --verbose",
     "build": "tsc"
   },
   "devDependencies": {
