@@ -26,7 +26,7 @@ export const config = {
   
   // Shopping list
   shoppingList: [
-    "500 gram bananer"
+    "2.5 kg bananer"
   ],
   
   // Ollama settings

@@ -1,15 +1,9 @@
 import { chromium, Page } from 'playwright';
 import { config } from './config';
 import { selectBestProduct } from './llm';
+import { Product } from './types';
 
-// Define a more comprehensive product interface
-interface Product {
-  title: string;
-  element: any;
-  price?: string;
-  comparePrice?: string;
-  displayVolume?: string;
-}
+// No longer need to define Product interface here since we're importing it
 
 async function shopForGroceries() {
   console.log('Starting browser...');
@@ -142,7 +136,8 @@ async function shopForGroceries() {
         element: titleElement,
         price, 
         comparePrice,
-        displayVolume
+        displayVolume,
+        quantity: 0 // Initialize quantity to 0
       });
     }
     
@@ -180,6 +175,131 @@ async function shopForGroceries() {
           console.log(`Clicking 'Buy' button for: ${selectedProduct.title}`);
           await buyButtonLocator.click();
           console.log('Successfully added product to cart!');
+          
+          // Initialize product quantity
+          selectedProduct.quantity = 1;
+          
+          // Wait a moment for the UI to update after clicking buy
+          await page.waitForTimeout(1000); // Increased timeout to ensure UI is fully updated
+          
+          // Debug: Check all buttons in the container
+          console.log("Checking all buttons in the product container after clicking 'Köp':");
+          const allButtons = await productContainerLocator.locator('button').count();
+          console.log(`Found ${allButtons} buttons in the container`);
+          
+          for (let i = 0; i < allButtons; i++) {
+            const button = productContainerLocator.locator('button').nth(i);
+            const text = await button.textContent();
+            const ariaLabel = await button.getAttribute('aria-label');
+            const testId = await button.getAttribute('data-testid');
+            const isVisible = await button.isVisible();
+            console.log(`Button ${i}: Text="${text}", aria-label="${ariaLabel}", data-testid="${testId}", visible=${isVisible}`);
+          }
+          
+          // Use the exact selectors from our debug output
+          const plusButtonLocator = productContainerLocator.locator('button[data-testid="plus-button"], button[aria-label="Öka antal"]');
+          const minusButtonLocator = productContainerLocator.locator('button[data-testid="minus-button"], button[aria-label="Minska antal"]');
+          
+          // Check if the plus button is visible
+          if (await plusButtonLocator.count() > 0) {
+            console.log("Found plus button for quantity adjustment");
+            
+            // Extract weight from display volume for calculations
+            let unitWeight = 0;
+            const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
+            if (weightMatch) {
+              let weight = parseInt(weightMatch[1], 10);
+              const unit = weightMatch[2].toLowerCase();
+              
+              // Convert to grams for calculations
+              if (unit === 'kg') {
+                weight *= 1000;
+              }
+              unitWeight = weight;
+              console.log(`Each ${selectedProduct.title} weighs approximately ${unitWeight}g`);
+            }
+            
+            // Get the required weight from shopping list
+            const shoppingListItem = config.shoppingList[0];
+            const requiredWeightMatch = shoppingListItem.match(/(\d+\.?\d*)\s*(g|gram|kg|kilo)/i);
+            let requiredWeight = 0;
+            
+            if (requiredWeightMatch) {
+              requiredWeight = parseFloat(requiredWeightMatch[1]);
+              const unit = requiredWeightMatch[2].toLowerCase();
+              
+              // Convert to grams for comparison
+              if (unit === 'kg' || unit === 'kilo') {
+                requiredWeight *= 1000;
+              }
+              console.log(`Shopping list requires approximately ${requiredWeight}g`);
+            }
+            
+            // Calculate how many items we need based on weight
+            if (unitWeight > 0 && requiredWeight > 0) {
+              const optimalQuantity = Math.ceil(requiredWeight / unitWeight);
+              const clicksNeeded = optimalQuantity - 1; // Already have one from the initial buy click
+              
+              console.log(`Optimal quantity to reach ${requiredWeight}g is ${optimalQuantity} (${optimalQuantity * unitWeight}g)`);
+              
+              // Click the plus button to increase quantity to optimal amount
+              for (let i = 0; i < clicksNeeded; i++) {
+                console.log(`Clicking plus button (${i+1}/${clicksNeeded})`);
+                await plusButtonLocator.click();
+                selectedProduct.quantity += 1;
+                await page.waitForTimeout(500); // Wait between clicks
+              }
+              
+              console.log(`Added ${optimalQuantity} of ${selectedProduct.title} (${optimalQuantity * unitWeight}g total)`);
+            } else {
+              // If we can't calculate based on weight, just add one more as an example
+              console.log("Adding one more item as an example");
+              await plusButtonLocator.click();
+              selectedProduct.quantity = 2;
+              
+              // Show that minus button works too by demonstrating
+              await page.waitForTimeout(1000);
+              if (await minusButtonLocator.count() > 0) {
+                console.log("Testing minus button functionality");
+                await minusButtonLocator.click();
+                selectedProduct.quantity = 1;
+                await page.waitForTimeout(500);
+                
+                // Add it back
+                await plusButtonLocator.click();
+                selectedProduct.quantity = 2;
+              }
+            }
+          } else {
+            console.log("Plus button not found after buying - may need to adjust selectors");
+          }
+          
+          // Display the final quantity information
+          console.log(`Final quantity: ${selectedProduct.quantity} of ${selectedProduct.title}`);
+          if (selectedProduct.displayVolume) {
+            const weightMatch = selectedProduct.displayVolume?.match(/(\d+)\s*(g|kg)/i);
+            if (weightMatch) {
+              let weight = parseInt(weightMatch[1], 10);
+              const unit = weightMatch[2].toLowerCase();
+              
+              // Convert to grams for calculations
+              if (unit === 'kg') {
+                weight *= 1000;
+              }
+              
+              const totalWeight = weight * selectedProduct.quantity;
+              
+              // Format the total weight nicely
+              let formattedWeight = '';
+              if (totalWeight >= 1000) {
+                formattedWeight = `${(totalWeight / 1000).toFixed(2)}kg`;
+              } else {
+                formattedWeight = `${totalWeight}g`;
+              }
+              
+              console.log(`Total weight: ${formattedWeight}`);
+            }
+          }
           
           // Wait a moment to see the result
           await page.waitForTimeout(3000);

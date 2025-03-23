@@ -1,16 +1,6 @@
 import { Ollama } from 'ollama';
 import { config } from './config';
-
-/**
- * Interface for product information
- */
-interface Product {
-  title: string;
-  element: any; // Playwright element
-  price?: string;
-  comparePrice?: string;
-  displayVolume?: string;
-}
+import { Product } from './types';
 
 /**
  * Sends a request to Ollama LLM to select the best product match
@@ -22,12 +12,12 @@ export async function selectBestProduct(products: Product[], shoppingListItem: s
     console.log(`Found ${products.length} products to choose from.`);
     
     // Check if the shopping list item mentions weight requirements
-    const weightMatch = shoppingListItem.match(/(\d+)\s*(g|gram|kg|kilo)/i);
+    const weightMatch = shoppingListItem.match(/(\d+\.?\d*)\s*(g|gram|kg|kilo)/i);
     let requestedWeight = 0;
     let requestedUnit = '';
     
     if (weightMatch) {
-      requestedWeight = parseInt(weightMatch[1], 10);
+      requestedWeight = parseFloat(weightMatch[1]);
       requestedUnit = weightMatch[2].toLowerCase();
       console.log(`Detected weight requirement: ${requestedWeight}${requestedUnit}`);
       
