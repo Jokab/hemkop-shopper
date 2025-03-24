@@ -8,7 +8,7 @@ import { extractIngredientsFromJsonLd } from './jsonldRecipeParser';
 
 // No longer need to define Product interface here since we're importing it
 
-async function shopForGroceries() {
+async function shopForGroceries(): Promise<void> {
   logger.info('Starting shopping process');
   
   try {
@@ -163,7 +163,7 @@ async function extractSearchTerm(shoppingListItem: string): Promise<string> {
  * @param page Playwright page
  * @param searchTerm The term to search for
  */
-async function searchForProduct(page: Page, searchTerm: string) {
+async function searchForProduct(page: Page, searchTerm: string): Promise<void> {
   logger.debug(`Finding search bar...`);
   
   // Locate and click the search bar
@@ -213,7 +213,7 @@ async function searchForProduct(page: Page, searchTerm: string) {
  * @param page Playwright page
  * @param shoppingListItem The shopping list item being processed
  */
-async function processSearchResults(page: Page, shoppingListItem: string) {
+async function processSearchResults(page: Page, shoppingListItem: string): Promise<void> {
   const products = await findProductsOnPage(page);
   if (products.length === 0) {
     logger.error('No products found on the page');
