@@ -127,52 +127,51 @@ Then, in the final line, provide ONLY a single digit number representing your ch
     const responseText = response.message.content.trim();
     logger.llm(`LLM reasoning:\n${responseText}`);
     
-    // Extract the product number from the response
+    // Extract the numeric choice from the end of the response
+    const lines = responseText.trim().split('\n');
+    const lastLine = lines[lines.length - 1].trim();
     
-    // First look for digits at the end of the response (most reliable)
-    const lastLineMatch = responseText.split('\n').filter(line => line.trim().length > 0).pop()?.match(/(\d+)/);
-    if (lastLineMatch) {
-      const selectedIndex = parseInt(lastLineMatch[1], 10) - 1;
-      if (selectedIndex >= 0 && selectedIndex < products.length) {
-        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
-        return products[selectedIndex];
+    // Try to find a single number on the last line (which is the direct selection)
+    let choiceMatch = lastLine.match(/^(\d+)$/);
+    
+    // If not found, try to find "Final choice: X" pattern
+    if (!choiceMatch) {
+      const finalChoiceMatch = responseText.match(/Final choice:\s*(\d+)/i);
+      if (finalChoiceMatch) {
+        choiceMatch = finalChoiceMatch;
       }
     }
     
-    // Check for "Product 2" pattern
-    const productPhraseMatch = /Product\s+(\d+)/i.exec(responseText);
-    if (productPhraseMatch) {
-      const selectedIndex = parseInt(productPhraseMatch[1], 10) - 1;
-      if (selectedIndex >= 0 && selectedIndex < products.length) {
-        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
-        return products[selectedIndex];
+    if (choiceMatch) {
+      const selectedIndex = parseInt(choiceMatch[1], 10) - 1; // Convert to 0-indexed
+      
+      // Validate the selected index
+      if (selectedIndex < 0 || selectedIndex >= products.length) {
+        logger.error(`LLM returned invalid product index: ${selectedIndex + 1} (out of range 1-${products.length})`);
+        return null;
       }
+      
+      // Check for discrepancies in reasoning
+      const reasoningText = responseText.toLowerCase();
+      if (reasoningText.includes('recommend product')) {
+        const recommendMatch = reasoningText.match(/recommend product (\d+)/i);
+        if (recommendMatch) {
+          const recommendedIndex = parseInt(recommendMatch[1], 10) - 1;
+          if (recommendedIndex !== selectedIndex) {
+            logger.error(`LLM reasoning inconsistency: Recommended product ${recommendedIndex + 1} but selected product ${selectedIndex + 1}`);
+          }
+        }
+      }
+      
+      logger.info(`LLM selected product index: ${selectedIndex + 1}`);
+      return products[selectedIndex];
     }
     
-    // Then try a clean single digit answer (1-9)
-    const singleDigitMatch = /^[1-9]$/.exec(responseText);
-    if (singleDigitMatch) {
-      const selectedIndex = parseInt(singleDigitMatch[0], 10) - 1;
-      if (selectedIndex >= 0 && selectedIndex < products.length) {
-        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
-        return products[selectedIndex];
-      }
-    }
+    logger.error('Failed to extract product choice from LLM response');
     
-    // If still not found, try looking for any number
-    const anyNumberMatch = /\b(\d+)\b/.exec(responseText);
-    if (anyNumberMatch) {
-      const selectedIndex = parseInt(anyNumberMatch[1], 10) - 1;
-      if (selectedIndex >= 0 && selectedIndex < products.length) {
-        logger.product(`Selected product ${selectedIndex + 1}: ${products[selectedIndex].title}`);
-        return products[selectedIndex];
-      }
-    }
-    
-    // If we still haven't found a valid product, use the first one as fallback
-    logger.error("Could not determine product selection from LLM response");
+    // As a fallback, use the first product
     if (products.length > 0) {
-      logger.product(`Falling back to first product: ${products[0].title}`);
+      logger.info(`Falling back to first product: ${products[0].title}`);
       return products[0];
     }
     
