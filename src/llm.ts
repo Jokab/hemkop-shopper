@@ -95,10 +95,11 @@ Also consider type, quality requirements, and price in your decision.
 If weight matches, then prefer products with the lowest comparison price (jmf pris).
 
 First, explain your reasoning in detail. Consider the following factors, in order of importance:
-1. Price comparison
-2. Product quality and type match
+1. Product type match
+2. Compare price
 3. Weight/volume match with the requirement
-4. Any other relevant factors
+4. Product quality
+5. Any other relevant factors
 
 Then, in the final line, provide ONLY a single digit number representing your choice. For example: 2
 `;
