@@ -4,7 +4,7 @@ export const config = {
   
   // Browser settings
   browser: {
-    headless: false,
+    headless: true,
     slowMo: 50 // Add a small delay between actions for visibility
   },
   
@@ -31,6 +31,25 @@ export const config = {
     "1kg havregryn",
     "3 burkar krossade tomater"
   ],
+  
+  // Recipe parser settings
+  recipeParser: {
+    timeout: 30000,
+    supportedSites: [
+      'ica.se',
+      'coop.se',
+      'koket.se',
+      'recepten.se',
+      'tasteline.com'
+    ],
+    excludeIngredients: [
+      'salt',
+      'peppar',
+      'vatten',
+      'olja',
+      'smör'
+    ]
+  },
   
   // Ollama settings
   ollama: {

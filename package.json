@@ -12,12 +12,14 @@
   "devDependencies": {
     "@playwright/test": "^1.51.1",
     "@types/node": "^22.13.11",
+    "@types/node-fetch": "^2.6.12",
     "playwright": "^1.51.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2",
     "vite": "^6.2.2"
   },
   "dependencies": {
+    "node-fetch": "^2.7.0",
     "ollama": "^0.5.14"
   }
 }

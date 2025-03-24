@@ -1,8 +1,10 @@
 import { chromium, Page } from 'playwright';
 import { config } from './config';
-import { selectBestProduct } from './llm';
+import { selectBestProduct, processIngredientDescription } from './llm';
 import { Product } from './types';
 import { logger } from './logger';
+import { extractIngredientsFromUrl } from './recipeParser';
+import { extractIngredientsFromJsonLd } from './jsonldRecipeParser';
 
 // No longer need to define Product interface here since we're importing it
 
@@ -10,6 +12,50 @@ async function shopForGroceries() {
   logger.info('Starting shopping process');
   
   try {
+    // Process recipe URL if provided
+    const recipeUrl = getRecipeUrlFromCommandLine();
+    let shoppingList: string[] = [];
+    
+    if (recipeUrl) {
+      logger.info(`Recipe URL provided: ${recipeUrl}`);
+      
+      // First try the JSON-LD parser
+      const ingredients = await extractIngredientsFromJsonLd(recipeUrl);
+      
+      if (ingredients.length === 0) {
+        logger.info('JSON-LD parser failed to extract ingredients, falling back to old parser');
+        // Fall back to the old parser if JSON-LD parser fails
+        const fallbackIngredients = await extractIngredientsFromUrl(recipeUrl);
+        
+        if (fallbackIngredients.length === 0) {
+          logger.error('Both parsers failed to extract ingredients from the recipe URL');
+          logger.info('Falling back to default shopping list');
+          shoppingList = config.shoppingList;
+        } else {
+          // Process ingredients from fallback parser
+          for (const ingredient of fallbackIngredients) {
+            logger.info(`Processing ingredient: "${ingredient}"`);
+            const searchTerm = await processIngredientDescription(ingredient);
+            logger.info(`Normalized to search term: "${searchTerm}"`);
+            shoppingList.push(searchTerm);
+          }
+        }
+      } else {
+        // Process ingredients from JSON-LD parser
+        for (const ingredient of ingredients) {
+          logger.info(`Processing ingredient: "${ingredient}"`);
+          const searchTerm = await processIngredientDescription(ingredient);
+          logger.info(`Normalized to search term: "${searchTerm}"`);
+          shoppingList.push(searchTerm);
+        }
+      }
+    } else {
+      logger.info('Using default shopping list');
+      shoppingList = config.shoppingList;
+    }
+    
+    logger.info(`Shopping list contains ${shoppingList.length} items`);
+    
     // Launch the browser
     const browser = await chromium.launch({
       headless: false,
@@ -31,17 +77,17 @@ async function shopForGroceries() {
     await handleCookieDialog(page);
     
     // Process each item in the shopping list sequentially
-    for (let itemIndex = 0; itemIndex < config.shoppingList.length; itemIndex++) {
-      const shoppingListItem = config.shoppingList[itemIndex];
-      logger.info(`Processing item ${itemIndex + 1}/${config.shoppingList.length}: ${shoppingListItem}`);
+    for (let itemIndex = 0; itemIndex < shoppingList.length; itemIndex++) {
+      const shoppingListItem = shoppingList[itemIndex];
+      logger.info(`Processing item ${itemIndex + 1}/${shoppingList.length}: ${shoppingListItem}`);
       
       // Extract search term from shopping list item
-      const searchTerm = extractSearchTerm(shoppingListItem);
+      const searchTerm = await extractSearchTerm(shoppingListItem);
       
-      // Search for the current item
+      // Search for the current item using normalized term
       await searchForProduct(page, searchTerm);
       
-      // Process search results and add to cart
+      // Process search results and add to cart using the original description
       await processSearchResults(page, shoppingListItem);
       
       // Short pause between items
@@ -62,20 +108,54 @@ async function shopForGroceries() {
 }
 
 /**
- * Extract a search term from a shopping list item
- * @param shoppingListItem The shopping list item text
+ * Get recipe URL from command line arguments
+ * @returns Recipe URL if provided, otherwise undefined
+ */
+function getRecipeUrlFromCommandLine(): string | undefined {
+  const args = process.argv.slice(2);
+  
+  // Look for a URL in the command line arguments
+  const urlArg = args.find(arg => arg.startsWith('http'));
+  
+  if (urlArg) {
+    try {
+      const url = new URL(urlArg);
+      return url.toString();
+    } catch (error) {
+      logger.error(`Invalid URL provided: ${urlArg}`);
+    }
+  }
+  
+  // Check for --recipe flag
+  const recipeIndex = args.findIndex(arg => arg === '--recipe' || arg === '-r');
+  if (recipeIndex !== -1 && recipeIndex < args.length - 1) {
+    try {
+      const url = new URL(args[recipeIndex + 1]);
+      return url.toString();
+    } catch (error) {
+      logger.error(`Invalid URL provided after --recipe flag: ${args[recipeIndex + 1]}`);
+    }
+  }
+  
+  return undefined;
+}
+
+/**
+ * Extract search term from shopping list item
+ * @param shoppingListItem The item from the shopping list
  * @returns The search term to use
  */
-function extractSearchTerm(shoppingListItem: string): string {
-  // Remove quantities and units to get a clean search term
-  const searchTerm = shoppingListItem
-    .replace(/\d+\.?\d*\s*(g|gram|kg|kilo|st|stycken|förp|förpackning|l|liter)/gi, '')
-    .replace(/^(en|ett)\s+/i, '') // Remove leading "en" or "ett"
-    .replace(/^burk\s+/i, '') // Remove leading container words
-    .replace(/^\s+|\s+$/g, ''); // Trim whitespace
-  
-  logger.debug(`Extracted search term: "${searchTerm}" from "${shoppingListItem}"`);
-  return searchTerm;
+async function extractSearchTerm(shoppingListItem: string): Promise<string> {
+  try {
+    // Use LLM to process the ingredient description
+    const searchTerm = await processIngredientDescription(shoppingListItem);
+    logger.info(`LLM processing: "${shoppingListItem}" → "${searchTerm}"`);
+    return searchTerm;
+  } catch (error) {
+    logger.error(`Error extracting search term: ${error}`);
+    // Fallback to using the original item
+    return shoppingListItem;
+  }
 }
 
 /**

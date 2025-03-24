@@ -180,4 +180,46 @@ Then, in the final line, provide ONLY a single digit number representing your ch
     logger.error(`Error with LLM selection: ${error}`);
     return null;
   }
+}
+
+/**
+ * Process an ingredient description to extract the search term
+ * @param ingredient The ingredient description (e.g. "4 äggulor")
+ * @returns The normalized search term (e.g. "ägg")
+ */
+export async function processIngredientDescription(ingredient: string): Promise<string> {
+  try {
+    const ollama = new Ollama({
+      host: config.ollama.url
+    });
+
+    const prompt = `
+I need to search for products in a grocery store. 
+Convert this ingredient description to the simplest, most basic search term:
+
+Ingredient: "${ingredient}"
+
+For example:
+- "4 äggulor" should be "ägg"
+- "500g vetemjöl" should be "vetemjöl"
+- "en burk krossade tomater" should be "krossade tomater"
+- "2.5 kg bananer" should be "banan"
+
+Return ONLY the normalized search term as plain text, with no explanation, formatting, or additional text.
+`;
+
+    const response = await ollama.chat({
+      model: config.ollama.model,
+      messages: [{ role: 'user', content: prompt }],
+      stream: false
+    });
+
+    const searchTerm = response.message.content.trim();
+    logger.debug(`Processed ingredient "${ingredient}" -> "${searchTerm}"`);
+    return searchTerm;
+  } catch (error) {
+    logger.error(`Error processing ingredient description: ${error}`);
+    // Fallback to using the original ingredient as search term
+    return ingredient;
+  }
 } 
