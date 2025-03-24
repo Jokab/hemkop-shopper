@@ -311,7 +311,7 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
     logger.debug(`Selected product price: ${selectedProduct.price || 'N/A'}`);
     logger.debug(`Selected product compare price: ${selectedProduct.comparePrice || 'N/A'}`);
     
-    // Find the product container - go up the DOM tree to the nearest article element
+    // Find the product container - go up the DOM tree
     const productContainerLocator = selectedProduct.element.locator('xpath=./ancestor::div[@data-testid="product-container"]');
     logger.debug('Looking for product container...');
     
@@ -403,11 +403,8 @@ async function processSearchResults(page: Page, shoppingListItem: string) {
             
             logger.info(`Added ${optimalQuantity} of ${selectedProduct.title} (${optimalQuantity * unitWeight}g total)`);
           } else {
-            // If we can't calculate based on weight, just add one more as an example
-            logger.debug("Adding one more item as an example");
-            await plusButtonLocator.click();
-            selectedProduct.quantity = 2;
-            logger.info(`Added 2 of ${selectedProduct.title}`);
+            // If we can't calculate based on weight, don't add more
+            logger.info(`Added 1 of ${selectedProduct.title}`);
           }
         } else {
           logger.debug("Plus button not found after buying - may need to adjust selectors");

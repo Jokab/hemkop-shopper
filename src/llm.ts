@@ -90,14 +90,14 @@ Available products:
 ${productListText}
 
 Based on the shopping list item, which product number is the best match? 
-WEIGHT IS THE MOST IMPORTANT FACTOR. Pick the product with weight closest to but not less than what's needed.
+Pick the product with weight closest to but not less than what's needed.
 Also consider type, quality requirements, and price in your decision.
 If weight matches, then prefer products with the lowest comparison price (jmf pris).
 
-First, explain your reasoning in detail. Consider the following factors:
-1. Weight/volume match with the requirement
+First, explain your reasoning in detail. Consider the following factors, in order of importance:
+1. Price comparison
 2. Product quality and type match
-3. Price comparison
+3. Weight/volume match with the requirement
 4. Any other relevant factors
 
 Then, in the final line, provide ONLY a single digit number representing your choice. For example: 2
