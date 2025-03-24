@@ -9,3 +9,4 @@ To run the script, simply run:
 yarn start <recipe_link>
 ```
 
+The code was written almost in its entirety using Cursor with Claude 3.7 Sonnet.
