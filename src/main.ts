@@ -76,6 +76,9 @@ async function shopForGroceries(): Promise<void> {
     // Handle cookie dialog with more patience
     await handleCookieDialog(page);
     
+    // Array to store cart items
+    const cartItems: Product[] = [];
+    
     // Process each item in the shopping list sequentially
     for (let itemIndex = 0; itemIndex < shoppingList.length; itemIndex++) {
       const shoppingListItem = shoppingList[itemIndex];
@@ -88,11 +91,19 @@ async function shopForGroceries(): Promise<void> {
       await searchForProduct(page, searchTerm);
       
       // Process search results and add to cart using the original description
-      await processSearchResults(page, shoppingListItem);
+      const addedProduct = await processSearchResults(page, shoppingListItem);
+      
+      // If a product was added to cart, store it
+      if (addedProduct) {
+        cartItems.push(addedProduct);
+      }
       
       // Short pause between items
       await page.waitForTimeout(2000);
     }
+    
+    // Log the final shopping cart contents
+    logFinalCart(cartItems);
     
     // Keep the browser open for the configured amount of time
     logger.info(`All shopping list items processed! Keeping browser open for ${config.timeouts.browserDisplay / 1000} seconds...`);
@@ -212,12 +223,13 @@ async function searchForProduct(page: Page, searchTerm: string): Promise<void> {
  * Process search results for a shopping list item
  * @param page Playwright page
  * @param shoppingListItem The shopping list item being processed
+ * @returns The product that was added to the cart, or undefined if none was added
  */
-async function processSearchResults(page: Page, shoppingListItem: string): Promise<void> {
+async function processSearchResults(page: Page, shoppingListItem: string): Promise<Product | undefined> {
   const products = await findProductsOnPage(page);
   if (products.length === 0) {
     logger.error('No products found on the page');
-    return;
+    return undefined;
   }
   
   // Log found products for debugging
@@ -227,7 +239,7 @@ async function processSearchResults(page: Page, shoppingListItem: string): Promi
   const selectedProduct = await selectBestProduct(products, shoppingListItem);
   if (!selectedProduct) {
     logger.error('LLM could not select a product');
-    return;
+    return undefined;
   }
   
   logger.info(`Selected: ${selectedProduct.title}`);
@@ -236,7 +248,7 @@ async function processSearchResults(page: Page, shoppingListItem: string): Promi
   
   // Add product to cart
   if (!await addProductToCart(page, selectedProduct)) {
-    return;
+    return undefined;
   }
   
   // Adjust quantity based on weight if needed
@@ -247,6 +259,8 @@ async function processSearchResults(page: Page, shoppingListItem: string): Promi
   
   // Wait a moment to see the result
   await page.waitForTimeout(2000);
+  
+  return selectedProduct;
 }
 
 /**
@@ -651,6 +665,45 @@ async function handleCookieDialog(page: Page): Promise<boolean> {
   
   logger.debug('Cookie dialog not found after multiple attempts. Continuing anyway...');
   return false;
+}
+
+/**
+ * Log the final cart contents in a nicely formatted table
+ * @param cartItems Array of products in the cart
+ */
+function logFinalCart(cartItems: Product[]): void {
+  if (cartItems.length === 0) {
+    logger.info('Final shopping cart is empty.');
+    return;
+  }
+
+  logger.info('=== FINAL SHOPPING CART ===');
+  logger.info('Name | Quantity | Price | Compare Price');
+  logger.info('-----|----------|-------|-------------');
+  
+  let totalPrice = 0;
+  
+  cartItems.forEach(item => {
+    // Extract price as number for total calculation
+    const priceText = item.price || '';
+    const priceMatch = priceText.match(/(\d+)[,.](\d+)/);
+    let itemPrice = 0;
+    
+    if (priceMatch) {
+      itemPrice = parseFloat(`${priceMatch[1]}.${priceMatch[2]}`);
+      // Calculate total price for this item
+      const itemTotal = itemPrice * item.quantity;
+      totalPrice += itemTotal;
+    }
+    
+    logger.info(
+      `${item.title} | ${item.quantity} | ${item.price || 'N/A'} | ${item.comparePrice || 'N/A'}`
+    );
+  });
+  
+  logger.info('-----|----------|-------|-------------');
+  logger.info(`TOTAL: ${totalPrice.toFixed(2)} kr (${cartItems.length} unique items)`);
+  logger.info('=============================');
 }
 
 // Run the main function
